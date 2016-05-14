@@ -7,6 +7,7 @@ from Queue import Empty
 from multiprocessing import Queue
 import time
 import sys
+import pprint
 
 import plaintext
 import zarafa
@@ -80,35 +81,6 @@ def db_put(db_path, key, value):
         with closing(dbhash.open(db_path, 'c')) as db:
             db[key] = value
 
-class IndexWorker(zarafa.Worker):
-    """ process which gets folders from input queue and indexes them, putting the nr of changes in output queue """
-
-    def main(self):
-        config, server = self.service.config, self.service.server
-        state_db = os.path.join(config['index_path'], server.guid+'_state')
-        while True:
-            changes = 0
-            with log_exc(self.log):
-                (_, storeguid, folderid, reindex) = self.iqueue.get()
-                store = server.store(storeguid)
-                folder = zarafa.Folder(store, folderid.decode('hex')) # XXX
-                if store.public or folder not in (store.junk, store.outbox):
-                    state = db_get(state_db, folder.entryid) if not reindex else None
-
-                    if state:
-                        self.log.info('processing changes for folder: %s %s' % (storeguid, folder.name))
-                        importer = FolderImporter(server.guid, config, self.log)
-                        new_state = folder.sync(importer, state, log=self.log)
-                    else:
-                        self.log.info('new folder, skipping changes so far: %s %s' % (storeguid, folder.name))
-                        new_state = folder.state
-
-                    if new_state != state:
-                        db_put(state_db, folder.entryid, new_state)
-                        # self.log.info('saved folder sync state: %s' % new_state)
-                        # changes = importer.changes + importer.deletes
-                        # self.log.info('syncing folder %s %s took %.2f seconds (%d changes, %d attachments)' % (storeguid, folder.name, time.time()-t0, changes, importer.attachments))
-            # self.oqueue.put(changes)
 
 class FolderImporter:
     """ tracks changes for a given folder (the actual changed items) """
@@ -148,7 +120,7 @@ class FolderImporter:
             doc['mapi3587'] = u' '.join([a.name + u' ' + a.email for a in item.cc]) # PR_DISPLAY_CC
             doc['mapi3586'] = u' '.join([a.name + u' ' + a.email for a in item.bcc]) # PR_DISPLAY_BCC
             doc['data'] = 'subject: %s\n' % item.subject
-            print item.subject
+            print (item.header('X-DSPAM-Recipient'))
             db_put(self.mapping_db, item.sourcekey, '%s %s' % (storeid, item.folder.entryid)) # ICS doesn't remember which store a change belongs to..
             # self.plugin.update(doc)
             self.term_cache_size += sum(len(v) for k, v in doc.iteritems() if k.startswith('mapi'))
@@ -167,6 +139,38 @@ class FolderImporter:
                 doc = {'serverid': self.serverid, 'storeid': storeid, 'sourcekey': item.sourcekey}
                 self.log.debug('store %s: deleted document with sourcekey %s' % (doc['storeid'], item.sourcekey))
                 # self.plugin.delete(doc)
+
+class IndexWorker(zarafa.Worker):
+    """ process which gets folders from input queue and indexes them, putting the nr of changes in output queue """
+
+    def main(self):
+        config, server = self.service.config, self.service.server
+        state_db = os.path.join(config['index_path'], server.guid+'_state')
+        while True:
+            changes = 0
+            with log_exc(self.log):
+                (_, storeguid, folderid, reindex) = self.iqueue.get()
+                store = server.store(storeguid)
+                folder = zarafa.Folder(store, folderid.decode('hex')) # XXX
+                if store.public or folder not in (store.junk, store.outbox):
+                    state = db_get(state_db, folder.entryid) if not reindex else None
+
+                    if state:
+                        self.log.info('processing changes for folder: %s %s' % (storeguid, folder.name))
+                        importer = FolderImporter(server.guid, config, self.log)
+                        new_state = folder.sync(importer, state, log=self.log)
+                    else:
+                        self.log.info('new folder, skipping changes so far: %s %s' % (storeguid, folder.name))
+                        new_state = folder.state
+
+                    if new_state != state:
+                        db_put(state_db, folder.entryid, new_state)
+                        # self.log.info('saved folder sync state: %s' % new_state)
+                        changes = importer.changes + importer.deletes
+                        # self.log.info('syncing folder %s %s took %.2f seconds (%d changes, %d attachments)' % (storeguid, folder.name, time.time()-t0, changes, importer.attachments))
+
+            self.oqueue.put(changes)
+
 
 class ServerImporter:
     """ tracks changes for a server node; queues encountered folders for updating """ # XXX improve ICS to track changed folders?
@@ -219,7 +223,7 @@ class Service(zarafa.Service):
             self.log.info('saved server sync state = %s' % self.state)
 
         # SearchWorker(self, 'query', reindex_queue=self.reindex_queue).start()
-        self.log.info('starting incremental sync')
+        self.log.info('monitoring mail movements')
         self.incremental_sync()
 
     def initial_sync(self, stores, reindex=False):
@@ -227,10 +231,9 @@ class Service(zarafa.Service):
 
         folders = [(f.count, s.guid, f.entryid, reindex) for s in stores for f in s.folders()]
         for f in sorted(folders, reverse=True):
-            print( type(f))
             self.iqueue.put(f)
         itemcount = sum(f[0] for f in folders)
-        self.log.info('queued %d folders (~%d changes) for parallel indexing (%s processes)' % (len(folders), itemcount, self.index_processes))
+        self.log.info('queued %d folders for initial state discovery' % (len(folders)))
         t0 = time.time()
         changes = sum([self.oqueue.get() for i in range(len(folders))]) # blocking
         self.log.info('queue processed in %.2f seconds (%d changes, ~%.2f/sec)' % (time.time()-t0, changes, changes/(time.time()-t0)))
@@ -250,9 +253,7 @@ class Service(zarafa.Service):
                     pass
                 importer = ServerImporter(self.server.guid, self.config, self.iqueue, self.log)
                 t0 = time.time()
-                self.log.info('start sync')
                 new_state = self.server.sync(importer, self.state, log=self.log)
-                self.log.info('done sync')
                 if new_state != self.state:
                     changes = sum([self.oqueue.get() for i in range(len(importer.queued))]) # blocking
                     for f in importer.queued:
