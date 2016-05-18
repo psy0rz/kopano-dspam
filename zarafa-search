@@ -9,9 +9,22 @@ if __name__ == '__main__':
 
 # flow:
 #
-#  Service.incremental_sync
+# Service.main()
+#
+#  Service.initial_sync (first time only)
+#   equeues all folders to iqueue
+#   waits for processing to be complete
+
+#
+#  Service.incremental_sync (main process)
 #   calls server.sync()
-#    calls for every change:
+#    calls for every folder change:
 #      ServerImporter.update()
-#       enqueues changes
-# -changes via iqueue--->Indexworker-->
+#       enqueues changed folders to iqueue
+#       waits for processing to be complete
+#   loop
+#
+#  IndexWorker (1 one more subprocesses)
+#   dequeues changed folders from iqueue
+#    calls folder.sync() for every folder
+#     calls FolderUpdater.update() for every update

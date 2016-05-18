@@ -6,5 +6,5 @@ while true; do
          	UPLOADEDMD5="$MD5"
 	 fi
     fi
-    sleep 5;
+    sleep 1;
 done

@@ -67,6 +67,14 @@ CONFIG = {
     'ssl_private_key_file': Config.path(default=None, check=False), # XXX don't check when default=None?
     'ssl_certificate_file': Config.path(default=None, check=False),
     'term_cache_size': Config.size(default=64000000),
+
+    'process_delay': Config.integer(default=1),
+
+    'header_result': Config.string(default="X-DSPAM-Result"),
+    'header_result_spam': Config.string(default="Spam"),
+
+    'header_user': Config.string(default="X-DSPAM-Recipient"),
+    'header_id': Config.string(default="X-DSPAM-Signature"),
 }
 
 def db_get(db_path, key):
@@ -83,12 +91,12 @@ def db_put(db_path, key, value):
 
 
 class FolderImporter:
-    """ tracks changes for a given folder (the actual changed items) """
+    """ tracks changes for a specific folder (the actual changed items) """
 
     def __init__(self, *args):
-        self.serverid, self.config, self.log = args
+        self.serverid, self.config, self.log, self.store, self.folder = args
         self.changes = self.deletes = self.attachments = 0
-        self.mapping_db = os.path.join(self.config['index_path'], self.serverid+'_mapping')
+        self.retrained_db = os.path.join(self.config['index_path'], self.serverid+'_retrained')
         self.excludes = set(self.config['index_exclude_properties']+[0x1000, 0x1009, 0x1013, 0x678C]) # PR_BODY, PR_RTF_COMPRESSED, PR_HTML, PR_EC_IMAP_EMAIL
         self.term_cache_size = 0
 
@@ -98,46 +106,96 @@ class FolderImporter:
         with log_exc(self.log):
             self.changes += 1
             storeid, folderid, sourcekey, docid = item.storeid, item.folderid, item.sourcekey, item.docid
-            self.log.debug('store %s, folder %d: new/updated document with sourcekey %s, docid %d' % (storeid, folderid, sourcekey, docid))
-            doc = {'serverid': self.serverid, 'storeid': storeid, 'folderid': folderid, 'docid': docid, 'sourcekey': item.sourcekey}
-            for prop in item.props():
-                if prop.id_ not in self.excludes:
-                    if isinstance(prop.value, unicode):
-                        if prop.value:
-                            doc['mapi%d' % prop.id_] = prop.value
-                    elif isinstance(prop.value, list):
-                        doc['mapi%d' % prop.id_] = u' '.join(x for x in prop.value if isinstance(x, unicode))
-            attach_text = []
-            if self.config['index_attachments']:
-                for a in item.attachments():
-                    self.log.debug('checking attachment (filename=%s, size=%d, mimetag=%s)' % (a.filename, len(a), a.mimetype))
-                    if 0 < len(a) < self.config['index_attachment_max_size'] and a.filename != 'inline.txt': # XXX inline attachment check
-                        self.attachments += 1
-                        attach_text.append(plaintext.get(a, mimetype=a.mimetype, log=self.log))
-                    attach_text.append(u' '+(a.filename or u''))
-            doc['mapi4096'] = item.body.text + u' ' + u' '.join(attach_text) # PR_BODY
-            doc['mapi3588'] = u' '.join([a.name + u' ' + a.email for a in item.to]) # PR_DISPLAY_TO
-            doc['mapi3587'] = u' '.join([a.name + u' ' + a.email for a in item.cc]) # PR_DISPLAY_CC
-            doc['mapi3586'] = u' '.join([a.name + u' ' + a.email for a in item.bcc]) # PR_DISPLAY_BCC
-            doc['data'] = 'subject: %s\n' % item.subject
-            print (item.header('X-DSPAM-Recipient'))
-            db_put(self.mapping_db, item.sourcekey, '%s %s' % (storeid, item.folder.entryid)) # ICS doesn't remember which store a change belongs to..
+            # doc = {'serverid': self.serverid, 'storeid': storeid, 'folderid': folderid, 'docid': docid, 'sourcekey': item.sourcekey}
+            # for prop in item.props():
+            #     if prop.id_ not in self.excludes:
+            #         if isinstance(prop.value, unicode):
+            #             if prop.value:
+            #                 doc['mapi%d' % prop.id_] = prop.value
+            #         elif isinstance(prop.value, list):
+            #             doc['mapi%d' % prop.id_] = u' '.join(x for x in prop.value if isinstance(x, unicode))
+            # attach_text = []
+            # if self.config['index_attachments']:
+            #     for a in item.attachments():
+            #         self.log.debug('checking attachment (filename=%s, size=%d, mimetag=%s)' % (a.filename, len(a), a.mimetype))
+            #         if 0 < len(a) < self.config['index_attachment_max_size'] and a.filename != 'inline.txt': # XXX inline attachment check
+            #             self.attachments += 1
+            #             attach_text.append(plaintext.get(a, mimetype=a.mimetype, log=self.log))
+            #         attach_text.append(u' '+(a.filename or u''))
+            # doc['mapi4096'] = item.body.text + u' ' + u' '.join(attach_text) # PR_BODY
+            # doc['mapi3588'] = u' '.join([a.name + u' ' + a.email for a in item.to]) # PR_DISPLAY_TO
+            # doc['mapi3587'] = u' '.join([a.name + u' ' + a.email for a in item.cc]) # PR_DISPLAY_CC
+            # doc['mapi3586'] = u' '.join([a.name + u' ' + a.email for a in item.bcc]) # PR_DISPLAY_BCC
+            # doc['data'] = 'subject: %s\n' % item.subject
+            # db_put(self.mapping_db, item.sourcekey, '%s %s' % (storeid, item.folder.entryid)) # ICS doesn't remember which store a change belongs to..
             # self.plugin.update(doc)
-            self.term_cache_size += sum(len(v) for k, v in doc.iteritems() if k.startswith('mapi'))
-            if (8*self.term_cache_size) > self.config['term_cache_size']: # XXX profile to fine-tune factor
-                # self.plugin.commit()
-                self.term_cache_size = 0
+
+            #is the document is processed by the spam filter at all?
+
+            if item.header(self.config['header_result'])==None:
+                log_str="folder '%s', subject '%s': " % (self.folder.name, item.subject)
+                self.log.debug(log_str+"ignored, no spam-headers found")
+            else:
+                detected_as_spam = ( item.header(self.config['header_result'])==self.config['header_result_spam'] )
+                retrained = ( db_get(self.retrained_db, item.sourcekey) == "1" )
+                in_spamfolder = ( self.folder == self.store.junk )
+
+                print (db_get(self.retrained_db, item.sourcekey))
+
+                log_str="folder: '%s', subject: '%s', sourcekey: %s, detected_as_spam: %s, retrained: %s, in_spamfolder: %s, CONCLUSION: " % (self.folder.name, item.subject, item.sourcekey, detected_as_spam, retrained, in_spamfolder)
+
+                # self.log.debug(log_str+"detected as spam: %s, retrained: %s, in spamfolder: %s" % ( detected_as_spam, retrained, in_spamfolder ) )
+
+                if detected_as_spam:
+                    if in_spamfolder:
+                        if retrained:
+                             self.log.debug(log_str+"moved back to spam again: undo training as innocent")
+                             db_put(self.retrained_db, item.sourcekey, None)
+                        else:
+                             self.log.debug(log_str+"spam already in spam folder, no action needed")
+                    #in non-spam folder
+                    else:
+                        if not retrained:
+                             self.log.debug(log_str+"moved from spam: retraining as innocent")
+                             db_put(self.retrained_db, item.sourcekey, "1")
+                        else:
+                             self.log.debug(log_str+"moved from spam, already retrained")
+
+                #not detected as spam
+                else:
+                    if in_spamfolder:
+                        if not retrained:
+                             self.log.debug(log_str+"moved to spam: retraining as spam")
+                             db_put(self.retrained_db, item.sourcekey, "1")
+                        else:
+                             self.log.debug(log_str+"moved to spam: already retrained")
+
+                    #in non-spam folder
+                    else:
+                        if retrained:
+                             self.log.debug(log_str+"moved from spam again: undo training as spam")
+                             db_put(self.retrained_db, item.sourcekey, None)
+                        else:
+                             self.log.debug(log_str+"normal mail already in normal folder: no action needed")
+
+
+
+            # self.term_cache_size += sum(len(v) for k, v in doc.iteritems() if k.startswith('mapi'))
+            # if (8*self.term_cache_size) > self.config['term_cache_size']: # XXX profile to fine-tune factor
+            #     # self.plugin.commit()
+            #     self.term_cache_size = 0
 
     def delete(self, item, flags):
         """ for a deleted item, determine store and ask indexing plugin to delete """
 
         with log_exc(self.log):
             self.deletes += 1
-            ids = db_get(self.mapping_db, item.sourcekey)
-            if ids: # when a 'new' item is deleted right away (spooler?), the 'update' function may not have been called
-                storeid, folderid = ids.split()
-                doc = {'serverid': self.serverid, 'storeid': storeid, 'sourcekey': item.sourcekey}
-                self.log.debug('store %s: deleted document with sourcekey %s' % (doc['storeid'], item.sourcekey))
+            self.log.debug('deleted document with sourcekey %s' % ( item.sourcekey ))
+            # ids = db_get(self.mapping_db, item.sourcekey)
+            # if ids: # when a 'new' item is deleted right away (spooler?), the 'update' function may not have been called
+            #     storeid, folderid = ids.split()
+            #     doc = {'serverid': self.serverid, 'storeid': storeid, 'sourcekey': item.sourcekey}
+            #     self.log.debug('store %s: deleted document with sourcekey %s' % (doc['storeid'], item.sourcekey))
                 # self.plugin.delete(doc)
 
 class IndexWorker(zarafa.Worker):
@@ -152,13 +210,14 @@ class IndexWorker(zarafa.Worker):
                 (_, storeguid, folderid, reindex) = self.iqueue.get()
                 store = server.store(storeguid)
                 folder = zarafa.Folder(store, folderid.decode('hex')) # XXX
-                if store.public or folder not in (store.junk, store.outbox):
+                if store.public or folder!=store.outbox:
                     state = db_get(state_db, folder.entryid) if not reindex else None
 
                     if state:
                         self.log.info('processing changes for folder: %s %s' % (storeguid, folder.name))
-                        importer = FolderImporter(server.guid, config, self.log)
+                        importer = FolderImporter(server.guid, config, self.log, store, folder)
                         new_state = folder.sync(importer, state, log=self.log)
+                        changes = importer.changes + importer.deletes
                     else:
                         self.log.info('new folder, skipping changes so far: %s %s' % (storeguid, folder.name))
                         new_state = folder.state
@@ -166,7 +225,6 @@ class IndexWorker(zarafa.Worker):
                     if new_state != state:
                         db_put(state_db, folder.entryid, new_state)
                         # self.log.info('saved folder sync state: %s' % new_state)
-                        changes = importer.changes + importer.deletes
                         # self.log.info('syncing folder %s %s took %.2f seconds (%d changes, %d attachments)' % (storeguid, folder.name, time.time()-t0, changes, importer.attachments))
 
             self.oqueue.put(changes)
@@ -176,7 +234,7 @@ class ServerImporter:
     """ tracks changes for a server node; queues encountered folders for updating """ # XXX improve ICS to track changed folders?
 
     def __init__(self, serverid, config, iqueue, log):
-        self.mapping_db = os.path.join(config['index_path'], serverid+'_mapping')
+        # self.mapping_db = os.path.join(config['index_path'], serverid+'_mapping')
         self.iqueue = iqueue
         self.queued = set() # sync each folder at most once
 
@@ -184,9 +242,10 @@ class ServerImporter:
         self.queue((0, item.storeid, item.folder.entryid))
 
     def delete(self, item, flags):
-        ids = db_get(self.mapping_db, item.sourcekey)
-        if ids:
-            self.queue((0,) + tuple(ids.split()))
+        pass
+        # ids = db_get(self.mapping_db, item.sourcekey)
+        # if ids:
+        #     self.queue((0,) + tuple(ids.split()))
 
     def queue(self, folder):
         if folder not in self.queued:
@@ -257,14 +316,13 @@ class Service(zarafa.Service):
                 if new_state != self.state:
                     changes = sum([self.oqueue.get() for i in range(len(importer.queued))]) # blocking
                     for f in importer.queued:
-                        self.log.info('queue')
                         self.iqueue.put(f+(False,)) # make sure folders are at least synced to new_state
                     changes += sum([self.oqueue.get() for i in range(len(importer.queued))]) # blocking
                     self.log.info('queue processed in %.2f seconds (%d changes, ~%.2f/sec)' % (time.time()-t0, changes, changes/(time.time()-t0)))
                     self.state = new_state
                     db_put(self.state_db, 'SERVER', self.state)
                     self.log.info('saved server sync state = %s' % self.state)
-            time.sleep(5)
+            time.sleep(self.config['process_delay'])
 
     def reindex(self):
         """ pass usernames/store-ids given on command-line to running search process """
