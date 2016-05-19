@@ -137,12 +137,11 @@ class FolderImporter:
                 self.log.debug(log_str+"ignored, no spam-headers found")
             else:
                 detected_as_spam = ( item.header(self.config['header_result'])==self.config['header_result_spam'] )
-                retrained = ( db_get(self.retrained_db, item.sourcekey) == "1" )
+                spam_id = item.header(self.config['header_user'])+"-"+item.header(self.config['header_id'])
+                retrained = ( db_get(self.retrained_db, spam_id) == "1" )
                 in_spamfolder = ( self.folder == self.store.junk )
 
-                print (db_get(self.retrained_db, item.sourcekey))
-
-                log_str="folder: '%s', subject: '%s', sourcekey: %s, detected_as_spam: %s, retrained: %s, in_spamfolder: %s, CONCLUSION: " % (self.folder.name, item.subject, item.sourcekey, detected_as_spam, retrained, in_spamfolder)
+                log_str="folder: '%s', subject: '%s', spam_id: %s, detected_as_spam: %s, retrained: %s, in_spamfolder: %s, CONCLUSION: " % (self.folder.name, item.subject, spam_id, detected_as_spam, retrained, in_spamfolder)
 
                 # self.log.debug(log_str+"detected as spam: %s, retrained: %s, in spamfolder: %s" % ( detected_as_spam, retrained, in_spamfolder ) )
 
@@ -150,14 +149,14 @@ class FolderImporter:
                     if in_spamfolder:
                         if retrained:
                              self.log.debug(log_str+"moved back to spam again: undo training as innocent")
-                             db_put(self.retrained_db, item.sourcekey, None)
+                             db_put(self.retrained_db, spam_id, None)
                         else:
                              self.log.debug(log_str+"spam already in spam folder, no action needed")
                     #in non-spam folder
                     else:
                         if not retrained:
                              self.log.debug(log_str+"moved from spam: retraining as innocent")
-                             db_put(self.retrained_db, item.sourcekey, "1")
+                             db_put(self.retrained_db, spam_id, "1")
                         else:
                              self.log.debug(log_str+"moved from spam, already retrained")
 
@@ -166,7 +165,7 @@ class FolderImporter:
                     if in_spamfolder:
                         if not retrained:
                              self.log.debug(log_str+"moved to spam: retraining as spam")
-                             db_put(self.retrained_db, item.sourcekey, "1")
+                             db_put(self.retrained_db, spam_id, "1")
                         else:
                              self.log.debug(log_str+"moved to spam: already retrained")
 
@@ -174,7 +173,7 @@ class FolderImporter:
                     else:
                         if retrained:
                              self.log.debug(log_str+"moved from spam again: undo training as spam")
-                             db_put(self.retrained_db, item.sourcekey, None)
+                             db_put(self.retrained_db, spam_id, None)
                         else:
                              self.log.debug(log_str+"normal mail already in normal folder: no action needed")
 
