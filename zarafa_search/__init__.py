@@ -39,13 +39,6 @@ implicit '*' at the end. not every search engine may perform well for this, but 
 
 CONFIG = {
     'coredump_enabled': Config.ignore(),
-    'index_attachments': Config.boolean(default=True),
-    'index_attachment_extension_filter': Config.ignore(),
-    'index_attachment_mime_filter': Config.ignore(),
-    'index_attachment_max_size': Config.size(default=2**24),
-    'index_attachment_parser': Config.ignore(),
-    'index_attachment_parser_max_memory': Config.ignore(),
-    'index_attachment_parser_max_cputime': Config.ignore(),
     # 0x007D: PR_TRANSPORT_MESSAGE_HEADERS
     # 0x0064: PR_SENT_REPRESENTING_ADDRTYPE
     # 0x0C1E: PR_SENDER_ADDRTYPE
@@ -57,9 +50,6 @@ CONFIG = {
     'index_path': Config.string(default='/var/lib/zarafa/search/'),
     'index_processes': Config.integer(default=1),
     'limit_results': Config.integer(default=0),
-    'optimize_age': Config.ignore(),
-    'optimize_start': Config.ignore(),
-    'optimize_stop': Config.ignore(),
     'run_as_user': Config.string(default="zarafa"),
     'run_as_group': Config.string(default="zarafa"),
     'search_engine': Config.string(default='xapian'),
@@ -148,14 +138,14 @@ class FolderImporter:
                 if detected_as_spam:
                     if in_spamfolder:
                         if retrained:
-                             self.log.debug(log_str+"moved back to spam again: undo training as innocent")
+                             self.log.info(log_str+"moved back to spam again: undo training as innocent")
                              db_put(self.retrained_db, spam_id, None)
                         else:
                              self.log.debug(log_str+"spam already in spam folder, no action needed")
                     #in non-spam folder
                     else:
                         if not retrained:
-                             self.log.debug(log_str+"moved from spam: retraining as innocent")
+                             self.log.info(log_str+"moved from spam: retraining as innocent")
                              db_put(self.retrained_db, spam_id, "1")
                         else:
                              self.log.debug(log_str+"moved from spam, already retrained")
@@ -164,7 +154,7 @@ class FolderImporter:
                 else:
                     if in_spamfolder:
                         if not retrained:
-                             self.log.debug(log_str+"moved to spam: retraining as spam")
+                             self.log.info(log_str+"moved to spam: retraining as spam")
                              db_put(self.retrained_db, spam_id, "1")
                         else:
                              self.log.debug(log_str+"moved to spam: already retrained")
@@ -172,7 +162,7 @@ class FolderImporter:
                     #in non-spam folder
                     else:
                         if retrained:
-                             self.log.debug(log_str+"moved from spam again: undo training as spam")
+                             self.log.info(log_str+"moved from spam again: undo training as spam")
                              db_put(self.retrained_db, spam_id, None)
                         else:
                              self.log.debug(log_str+"normal mail already in normal folder: no action needed")
@@ -213,12 +203,12 @@ class IndexWorker(zarafa.Worker):
                     state = db_get(state_db, folder.entryid) if not reindex else None
 
                     if state:
-                        self.log.info('processing changes for folder: %s %s' % (storeguid, folder.name))
+                        self.log.debug('processing changes for folder: %s %s' % (storeguid, folder.name))
                         importer = FolderImporter(server.guid, config, self.log, store, folder)
                         new_state = folder.sync(importer, state, log=self.log)
                         changes = importer.changes + importer.deletes
                     else:
-                        self.log.info('new folder, skipping changes so far: %s %s' % (storeguid, folder.name))
+                        self.log.debug('new folder, skipping changes so far: %s %s' % (storeguid, folder.name))
                         new_state = folder.state
 
 
@@ -240,7 +230,7 @@ class ServerImporter:
         self.queued = set() # sync each folder at most once
 
     def update(self, item, flags):
-        if item.folder!=item.store.wastebasket:
+        if item.folder!=item.store.wastebasket and item.folder!=item.store.drafts:
             self.queue((0, item.storeid, item.folder.entryid))
         else:
             self.log.debug("ignoring changes in folder: '%s'" % (item.folder.name))
@@ -277,17 +267,17 @@ class Service(zarafa.Service):
             worker.start()
         self.state = db_get(self.state_db, 'SERVER')
         if self.state:
-            self.log.info('found previous server sync state: %s' % self.state)
+            self.log.debug('found previous server sync state: %s' % self.state)
         else:
-            self.log.info('starting initial sync')
+            self.log.info('starting initial sync, this can take a while...')
             new_state = self.server.state # syncing will reach at least the current state
             self.initial_sync(self.server.stores())
             self.state = new_state
             db_put(self.state_db, 'SERVER', self.state)
-            self.log.info('saved server sync state = %s' % self.state)
+            self.log.info('initial sync done, server sync state = %s' % self.state)
 
         # SearchWorker(self, 'query', reindex_queue=self.reindex_queue).start()
-        self.log.info('monitoring mail movements')
+        self.log.info('startup complete, monitoring mail movements')
         self.incremental_sync()
 
     def initial_sync(self, stores, reindex=False):
@@ -297,10 +287,10 @@ class Service(zarafa.Service):
         for f in sorted(folders, reverse=True):
             self.iqueue.put(f)
         itemcount = sum(f[0] for f in folders)
-        self.log.info('queued %d folders for initial state discovery' % (len(folders)))
+        self.log.debug('queued %d folders for initial state discovery' % (len(folders)))
         t0 = time.time()
         changes = sum([self.oqueue.get() for i in range(len(folders))]) # blocking
-        self.log.info('queue processed in %.2f seconds (%d changes, ~%.2f/sec)' % (time.time()-t0, changes, changes/(time.time()-t0)))
+        self.log.debug('queue processed in %.2f seconds (%d changes, ~%.2f/sec)' % (time.time()-t0, changes, changes/(time.time()-t0)))
 
     def incremental_sync(self):
         """ process changes in real-time (not yet parallelized); if no pending changes handle reindex requests """
@@ -323,10 +313,10 @@ class Service(zarafa.Service):
                     for f in importer.queued:
                         self.iqueue.put(f+(False,)) # make sure folders are at least synced to new_state
                     changes += sum([self.oqueue.get() for i in range(len(importer.queued))]) # blocking
-                    self.log.info('queue processed in %.2f seconds (%d changes, ~%.2f/sec)' % (time.time()-t0, changes, changes/(time.time()-t0)))
+                    self.log.debug('queue processed in %.2f seconds (%d changes, ~%.2f/sec)' % (time.time()-t0, changes, changes/(time.time()-t0)))
                     self.state = new_state
                     db_put(self.state_db, 'SERVER', self.state)
-                    self.log.info('saved server sync state = %s' % self.state)
+                    self.log.debug('saved server sync state = %s' % self.state)
             time.sleep(self.config['process_delay'])
 
     def reindex(self):
@@ -350,7 +340,7 @@ def main():
     parser = zarafa.parser('ckpsF') # select common cmd-line options
     parser.add_option('-r', '--reindex', dest='reindex', action='append', default=[], help='Reindex user/store', metavar='USER')
     options, args = parser.parse_args()
-    service = Service('search', config=CONFIG, options=options)
+    service = Service('spamd', config=CONFIG, options=options)
     if options.reindex:
         service.reindex()
     else:
