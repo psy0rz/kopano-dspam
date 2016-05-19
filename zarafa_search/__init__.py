@@ -221,6 +221,7 @@ class IndexWorker(zarafa.Worker):
                         self.log.info('new folder, skipping changes so far: %s %s' % (storeguid, folder.name))
                         new_state = folder.state
 
+
                     if new_state != state:
                         db_put(state_db, folder.entryid, new_state)
                         # self.log.info('saved folder sync state: %s' % new_state)
@@ -230,15 +231,20 @@ class IndexWorker(zarafa.Worker):
 
 
 class ServerImporter:
-    """ tracks changes for a server node; queues encountered folders for updating """ # XXX improve ICS to track changed folders?
+    """ tracks changes for a server node; queues encountered folders for updating """
 
     def __init__(self, serverid, config, iqueue, log):
         # self.mapping_db = os.path.join(config['index_path'], serverid+'_mapping')
+        self.log = log
         self.iqueue = iqueue
         self.queued = set() # sync each folder at most once
 
     def update(self, item, flags):
-        self.queue((0, item.storeid, item.folder.entryid))
+        if item.folder!=item.store.wastebasket:
+            self.queue((0, item.storeid, item.folder.entryid))
+        else:
+            self.log.debug("ignoring changes in folder: '%s'" % (item.folder.name))
+
 
     def delete(self, item, flags):
         pass
