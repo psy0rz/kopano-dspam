@@ -6,6 +6,7 @@ import os.path
 import time
 import sys
 import pprint
+import subprocess
 
 import zarafa
 from zarafa import log_exc, Config
@@ -53,6 +54,27 @@ class FolderImporter:
         self.server, self.config, self.log = args
         self.retrained_db = os.path.join(self.config['spamd_path'], self.server.guid+'_retrained')
 
+    def call_retrain_script(self, spam_user, spam_id, classification, undo):
+        cmd = [ self.config['retrain_script'], spam_user, spam_id, classification, undo ]
+        self.log.debug("Starting: %s" % cmd)
+        p=subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        output=p.communicate()[0]
+        if output:
+            self.log.error(output)
+
+        if p.returncode!=0:
+            self.log.error("Command exited with code %d" % p.returncode)
+        else:
+            self.log.debug("Command exited with code %d" % p.returncode)
+
+    def train(self, spam_user, spam_id, classification, undo):
+        if undo=="undo":
+            db_put(self.retrained_db, spam_user+"-"+spam_id, None)
+        else:
+            db_put(self.retrained_db, spam_user+"-"+spam_id, "1")
+
+        self.call_retrain_script(spam_user, spam_id, classification, undo)
+
     def update(self, item, flags):
 
         with log_exc(self.log):
@@ -68,8 +90,9 @@ class FolderImporter:
             else:
 
                 detected_as_spam = ( item.header(self.config['header_result'])==self.config['header_result_spam'] )
-                spam_id = item.header(self.config['header_user'])+"-"+item.header(self.config['header_id'])
-                retrained = ( db_get(self.retrained_db, spam_id) == "1" )
+                spam_user = item.header(self.config['header_user'])
+                spam_id   = item.header(self.config['header_id'])
+                retrained = ( db_get(self.retrained_db, spam_user+"-"+spam_id) == "1" )
                 in_spamfolder = ( item.folder == item.store.junk )
 
                 log_str="folder: '%s', subject: '%s', spam_id: %s, detected_as_spam: %s, retrained: %s, in_spamfolder: %s, CONCLUSION: " % (item.folder.name, item.subject, spam_id, detected_as_spam, retrained, in_spamfolder)
@@ -78,14 +101,14 @@ class FolderImporter:
                     if in_spamfolder:
                         if retrained:
                              self.log.info(log_str+"moved back to spam again: undo training as innocent")
-                             db_put(self.retrained_db, spam_id, None)
+                             self.train(spam_user, spam_id, "spam", "undo")
                         else:
                              self.log.debug(log_str+"spam already in spam folder, no action needed")
                     #in non-spam folder
                     else:
                         if not retrained:
                              self.log.info(log_str+"moved from spam: retraining as innocent")
-                             db_put(self.retrained_db, spam_id, "1")
+                             self.train(spam_user, spam_id, "innocent", "")
                         else:
                              self.log.debug(log_str+"moved from spam, already retrained")
 
@@ -94,7 +117,7 @@ class FolderImporter:
                     if in_spamfolder:
                         if not retrained:
                              self.log.info(log_str+"moved to spam: retraining as spam")
-                             db_put(self.retrained_db, spam_id, "1")
+                             self.train(spam_user, spam_id, "spam", "")
                         else:
                              self.log.debug(log_str+"moved to spam: already retrained")
 
@@ -102,7 +125,7 @@ class FolderImporter:
                     else:
                         if retrained:
                              self.log.info(log_str+"moved from spam again: undo training as spam")
-                             db_put(self.retrained_db, spam_id, None)
+                             self.train(spam_user, spam_id, "innocent", "undo")
                         else:
                              self.log.debug(log_str+"normal mail already in normal folder: no action needed")
 
