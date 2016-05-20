@@ -121,28 +121,25 @@ class Service(zarafa.Service):
         os.umask(0077)
         if not os.path.exists(spamd_path):
             os.makedirs(spamd_path)
-        self.state_db = os.path.join(spamd_path, self.server.guid+'_state')
-        self.state = db_get(self.state_db, 'SERVER')
-        if self.state:
-            self.log.debug('found previous server sync state: %s' % self.state)
+        state_db = os.path.join(spamd_path, self.server.guid+'_state')
+        state = db_get(state_db, 'SERVER')
+        if state:
+            self.log.debug('found previous server sync state: %s' % state)
         else:
-            self.state=self.server.state
-            self.log.debug('no previous state found, starting from state: %s' % self.state)
-            db_put(self.state_db, 'SERVER', self.state)
+            state=self.server.state
+            self.log.debug('no previous state found, starting from state: %s' % state)
+            db_put(state_db, 'SERVER', state)
 
+        #incremental syncer
         self.log.info('startup complete, monitoring mail movements')
-        self.incremental_sync()
-
-    def incremental_sync(self):
-
         importer = FolderImporter(self.server, self.config, self.log)
         while True:
             with log_exc(self.log):
-                new_state = self.server.sync(importer, self.state, log=self.log)
-                if new_state != self.state:
-                    self.state = new_state
-                    db_put(self.state_db, 'SERVER', self.state)
-                    self.log.debug('saved server sync state = %s' % self.state)
+                new_state = self.server.sync(importer, state, log=self.log)
+                if new_state != state:
+                    state = new_state
+                    db_put(state_db, 'SERVER', state)
+                    self.log.debug('saved server sync state = %s' % state)
             time.sleep(self.config['process_delay'])
 
 
