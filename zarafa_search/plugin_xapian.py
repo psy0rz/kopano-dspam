@@ -22,8 +22,8 @@ but in the old situation we have one database per store which is nice.
 """
 
 class Plugin:
-    def __init__(self, index_path, log):
-        self.index_path = index_path
+    def __init__(self, spamd_path, log):
+        self.spamd_path = spamd_path
         self.log = log
         self.data = []
         self.deletes = []
@@ -31,7 +31,7 @@ class Plugin:
     def open_db(self, server_guid, store_guid, writable=False, log=None):
         """ open xapian database; if locked, wait until unlocked """
 
-        dbpath = os.path.join(self.index_path, '%s-%s' % (server_guid, store_guid))
+        dbpath = os.path.join(self.spamd_path, '%s-%s' % (server_guid, store_guid))
         try:
             if writable:
                 with open(os.path.join(dbpath+'.lock'), 'w') as lockfile: # avoid compaction using an external lock to be safe
@@ -128,6 +128,6 @@ class Plugin:
     def reindex(self, server_guid, store_guid):
         """ remove database so we can cleanly reindex the store """
 
-        dbpath = os.path.join(self.index_path, '%s-%s' % (server_guid, store_guid))
+        dbpath = os.path.join(self.spamd_path, '%s-%s' % (server_guid, store_guid))
         self.log.info('removing %s' % dbpath)
         shutil.rmtree(dbpath, ignore_errors=True) # may not exist yet (no items to index)

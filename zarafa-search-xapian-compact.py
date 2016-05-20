@@ -15,14 +15,14 @@ def cmd(c):
 def main():
     print 'zarafa-search-xapian-compact started'
     server = zarafa.Server()
-    index_path = zarafa.Config(None, 'search').get('index_path')
+    spamd_path = zarafa.Config(None, 'search').get('spamd_path')
     if len(sys.argv) > 1:
         stores = [server.store(arg) for arg in sys.argv[1:]]
     else:
         stores = server.stores()
     for store in stores:
         try:
-            dbpath = os.path.join(index_path, server.guid+'-'+store.guid)
+            dbpath = os.path.join(spamd_path, server.guid+'-'+store.guid)
             print 'compact:', dbpath
             if os.path.isdir(dbpath):
                 with open('%s.lock' % dbpath, 'w') as lockfile: # do not index at the same time

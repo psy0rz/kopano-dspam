@@ -6,7 +6,7 @@ INDEXING
 -attachments are not indexed by default ('index_attachments' in search.cfg) (note that attachments can really slow down indexing)
 -attachments are converted with external tools such as pdf2text, then handed to the configured search engine
 -it indexes _all_ stores on the _current_ server node (so that is including any public stores..)
--for xapian, each store has its own xapian 'index database' directory, usually in /var/lib/zarafa/index ('index_path' in search.cfg). format is 'serverguid-storeguid'.
+-for xapian, each store has its own xapian 'index database' directory, usually in /var/lib/zarafa/index ('spamd_path' in search.cfg). format is 'serverguid-storeguid'.
 -xapian databases can be inspected with standard tool 'delve'. for example 'delve databasename' gives general info such as total item count.
 -another standard tool 'xapian-compact' can be used to defragment/compress a xapian database. the script 'zarafa-search-xapian-compact.py' loops over all databases and compacts them (this should work even while search is running). customers will probably want to run this after initial indexing and then perhaps once every month or several months.
 -there are two phases in indexing, initial and incremental. 
