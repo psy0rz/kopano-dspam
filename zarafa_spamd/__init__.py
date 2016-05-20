@@ -7,7 +7,6 @@ import time
 import sys
 import pprint
 
-import plaintext
 import zarafa
 from zarafa import log_exc, Config
 sys.path.insert(0, os.path.dirname(__file__)) # XXX for __import__ to work

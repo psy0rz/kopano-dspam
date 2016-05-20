@@ -1,7 +1,7 @@
 from distutils.core import setup, Extension
 
-setup(name='zarafa-search',
+setup(name='zarafa-spamd',
       version='0.1',
-      packages=['zarafa_search'],
+      packages=['zarafa_spamd'],
       package_data={'': ['xmltotext.xslt']},
 )
