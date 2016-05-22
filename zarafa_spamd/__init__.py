@@ -7,6 +7,7 @@ import time
 import sys
 import pprint
 import subprocess
+import re
 
 import zarafa
 from zarafa import log_exc, Config
@@ -31,7 +32,16 @@ CONFIG = {
     'header_user': Config.string(default="X-DSPAM-Recipient"),
     'header_id': Config.string(default="X-DSPAM-Signature"),
 
+    #script to call with retrain data. parameters:
+    # $1: spam-filter user
+    # $2: spam-filter message id or token
+    # $3: retrain classification: 'spam' or 'innocent'
+    # $4: when a previous training should be undo, this has the value 'undo' (e.g. when the user moves a message user back to the previous folder again)
+    #     most filters dont support this, and will probably just retrain the data again.
     'retrain_script': Config.string(default="/etc/zarafa/userscripts/zarafa-spamd-retrain"),
+
+    #filter dangerous characters before calling shell script
+    'shell_filter_regex': Config.string(default="[^a-zA-Z0-9_,.-]"),
 }
 
 def db_get(db_path, key):
@@ -55,12 +65,20 @@ class FolderImporter:
         self.retrained_db = os.path.join(self.config['spamd_path'], self.server.guid+'_retrained')
 
     def call_retrain_script(self, spam_user, spam_id, classification, undo):
-        cmd = [ self.config['retrain_script'], spam_user, spam_id, classification, undo ]
+        cmd = [
+            self.config['retrain_script'],
+            re.sub(self.config['shell_filter_regex'], "", spam_user),
+            re.sub(self.config['shell_filter_regex'], "", spam_id),
+            re.sub(self.config['shell_filter_regex'], "", classification),
+            re.sub(self.config['shell_filter_regex'], "", undo )
+            ]
+
+
         self.log.debug("Starting: %s" % cmd)
         p=subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         output=p.communicate()[0]
         if output:
-            self.log.error(output)
+            self.log.error(self.config['retrain_script']+" output:\n"+output)
 
         if p.returncode!=0:
             self.log.error("Command exited with code %d" % p.returncode)
