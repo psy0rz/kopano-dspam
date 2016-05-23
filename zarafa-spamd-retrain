@@ -1,13 +1,14 @@
 #!/bin/bash
 
-#Dspam example script we use ourselfs.
-#Note that this requires a patches version of dspam with patches/datux_dspam_recipient.patch.
+#This script will be called for each retrained mail.
+
+#Dspam example script DatuX uses in their SYN-3 server product.
+#Note that this requires a patched version of dspam with patches/datux_dspam_recipient.patch.
 #This will add the required X-DSPAM-Recipient header to the mail.
 
 SPAM_USER="$1"
 SPAM_ID="$2"
 CLASSIFICATION="$3"
 UNDO="$4"
-
 
 /usr/bin/dspamc --source=error --class="$CLASSIFICATION" --signature="$SPAM_ID" --user "$SPAM_USER"
