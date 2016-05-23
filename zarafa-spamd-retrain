@@ -1,0 +1,11 @@
+#!/bin/bash
+
+#dspam example script. note that this require the dspam-user-patch that adds the receipient user as a header.
+
+SPAM_USER="$1"
+SPAM_ID="$2"
+CLASSIFICATION="$3"
+UNDO="$4"
+
+
+/usr/bin/dspamc --source=error --class="$CLASSIFICATION" --signature="$SPAM_ID" --user "$SPAM_USER"

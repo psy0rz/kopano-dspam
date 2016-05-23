@@ -36,8 +36,8 @@ CONFIG = {
     # $1: spam-filter user
     # $2: spam-filter message id or token
     # $3: retrain classification: 'spam' or 'innocent'
-    # $4: when a previous training should be undo, this has the value 'undo' (e.g. when the user moves a message user back to the previous folder again)
-    #     most filters dont support this, and will probably just retrain the data again.
+    # $4: when a previous training should be undone, this has the value 'undo' (e.g. when the user moves a message user back to the previous folder again)
+    #     most filters dont support this, and you will probably just retrain the data again.
     'retrain_script': Config.string(default="/etc/zarafa/userscripts/zarafa-spamd-retrain"),
 
     #filter dangerous characters before calling shell script
@@ -57,7 +57,7 @@ def db_put(db_path, key, value):
             db[key] = value
 
 
-class FolderImporter:
+class ItemImporter:
     """ called by python-zarafa syncer for every item thats updated or deleted """
 
     def __init__(self, *args):
@@ -173,7 +173,7 @@ class Service(zarafa.Service):
 
         #incremental syncer
         self.log.info('startup complete, monitoring mail movements')
-        importer = FolderImporter(self.server, self.config, self.log)
+        importer = ItemImporter(self.server, self.config, self.log)
         while True:
             with log_exc(self.log):
                 new_state = self.server.sync(importer, state, log=self.log)
