@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.dirname(__file__)) # XXX for __import__ to work
 """
 zarafa-spamd v1 - monitors mail-movements to retrain your spamfilter
 
-Created by Edwin Eefting (edwin@datux.nl), based on zarafa-search and the excellent python-zarafa API.
+(C)2016 Edwin Eefting (edwin@datux.nl), based on zarafa-search and the excellent python-zarafa API.
 
 Copyright 2005 - 2015  Zarafa B.V. and its licensors
 
