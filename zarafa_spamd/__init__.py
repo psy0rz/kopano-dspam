@@ -49,12 +49,6 @@ CONFIG = {
     'header_user': Config.string(default="X-DSPAM-Recipient"),
     'header_id': Config.string(default="X-DSPAM-Signature"),
 
-    #script to call with retrain data. parameters:
-    # $1: spam-filter user
-    # $2: spam-filter message id or token
-    # $3: retrain classification: 'spam' or 'innocent'
-    # $4: when a previous training should be undone, this has the value 'undo' (e.g. when the user moves a message user back to the previous folder again)
-    #     most filters dont support this, and you will probably just retrain the data again.
     'retrain_script': Config.string(default="/etc/zarafa/userscripts/zarafa-spamd-retrain"),
 
     #filter dangerous characters before calling shell script

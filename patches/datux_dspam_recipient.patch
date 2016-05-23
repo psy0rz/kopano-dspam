@@ -1,0 +1,178 @@
+Index: src/dspam.c
+===================================================================
+--- src/dspam.c	(revision 5931)
++++ src/dspam.c	(revision 5932)
+@@ -3287,6 +3287,19 @@
+         else
+           LOG (LOG_CRIT, ERR_MEM_ALLOC);
+ 
++        snprintf(data, sizeof(data), "X-DSPAM-Recipient: %s", 
++                 ATX->recipient);
++        head = _ds_create_header_field(data);
++        if (head != NULL)
++        {
++#ifdef VERBOSE
++          LOGDEBUG("appending header %s: %s", head->heading, head->data);
++#endif
++          nt_add(block->headers, (void *) head);
++        }
++        else
++          LOG (LOG_CRIT, ERR_MEM_ALLOC);
++
+         if (_ds_match_attribute(agent_config, "ImprobabilityDrive", "on"))
+         {
+           float probability = CTX->confidence;
+Index: src/tools/dspam_2sql.c
+===================================================================
+--- src/tools/dspam_2sql.c	(revision 5931)
++++ src/tools/dspam_2sql.c	(revision 5932)
+@@ -113,7 +113,17 @@
+   signal (SIGTERM, dieout);
+ 
+   dspam_init_driver (NULL);
+-  ret = process_all_users();
++
++  if (argc<2)
++  {
++     ret = process_all_users();
++  }
++  else
++  {
++    ret = dump_user(argv[1]);
++  }
++
++
+   dspam_shutdown_driver (NULL);
+   _ds_destroy_config(agent_config);
+   libdspam_shutdown();
+@@ -161,6 +171,7 @@
+ int
+ dump_user (const char *username)
+ {
++  int uid;
+   struct passwd *p;
+   struct _ds_storage_record *record;
+   DSPAM_CTX *CTX;
+@@ -168,9 +179,13 @@
+   p = getpwnam (username);
+   if (p == NULL)
+   {
+-    fprintf (stderr, "Unable to obtain uid for user %s\n", username);
+-    return EUNKNOWN;
++    fprintf (stderr, "Unable to obtain uid for user %s. Using uid=1 instead!\n", username);
++    uid=1;
+   }
++  else
++  {
++    uid=p->pw_uid;
++  }
+ 
+   CTX = dspam_create (username, NULL, _ds_read_attribute(agent_config, "Home"), DSM_CLASSIFY, 0);
+   open_mtx = CTX;
+@@ -189,7 +204,7 @@
+ 
+   printf
+     ("insert into dspam_stats (uid, spam_learned, innocent_learned, spam_misclassified, innocent_misclassified, spam_corpusfed, innocent_corpusfed, spam_classified, innocent_classified) values(%d, %ld, %ld, %ld, %ld, %ld, %ld, %ld, %ld);\n",
+-     (int) p->pw_uid, CTX->totals.spam_learned, CTX->totals.innocent_learned,
++     uid, CTX->totals.spam_learned, CTX->totals.innocent_learned,
+      CTX->totals.spam_misclassified, CTX->totals.innocent_misclassified,
+      CTX->totals.spam_corpusfed, CTX->totals.innocent_corpusfed,
+      CTX->totals.spam_classified, CTX->totals.innocent_classified);
+@@ -199,7 +214,7 @@
+   {
+     printf
+       ("insert into dspam_token_data (uid, token, spam_hits, innocent_hits, last_hit) values(%d, \"%"LLU_FMT_SPEC"\", %ld, %ld, %ld);\n",
+-       (int) p->pw_uid, record->token, record->spam_hits,
++       uid, record->token, record->spam_hits,
+        record->innocent_hits, (long) record->last_hit);
+     record = _ds_get_nexttoken (CTX);
+   }
+Index: webui/cgi-bin/dspam.cgi
+===================================================================
+--- webui/cgi-bin/dspam.cgi	(revision 5931)
++++ webui/cgi-bin/dspam.cgi	(revision 5932)
+@@ -918,7 +918,7 @@
+     }
+     if ($head{'X-DSPAM-Signature'} eq $FORM{'signatureID'}) {
+       $found = 1;
+-      open(PIPE, "|$CONFIG{'DSPAM'} $CONFIG{'DSPAM_ARGS'}  >$TMPFILE 2>&1") || &error($!);
++      open(PIPE, "|$CONFIG{'DSPAM'} $CONFIG{'DSPAM_ARGS'} --rcpt-to $head{'X-DSPAM-Recipient'} >$TMPFILE 2>&1") || &error($!);
+       foreach(@temp) {
+         print PIPE "$_\n";
+       }
+@@ -1012,8 +1012,17 @@
+ 
+ sub Deliver {
+   my(@temp) = @_;
+-  open(PIPE, "|$CONFIG{'DSPAM'} $CONFIG{'DSPAM_ARGS'}") || return $!;
++  #determine original recipient
++  my $recipient;
+   foreach(@temp) {
++  	if ( /^X-DSPAM-Recipient: .*/ )
++	{
++		($recipient) = /^X-DSPAM-Recipient: (.*)/;
++	}
++  }
++ 
++  open(PIPE, "|$CONFIG{'DSPAM'} $CONFIG{'DSPAM_ARGS'} --rcpt-to $recipient") || return $!;
++  foreach(@temp) {
+     print PIPE "$_\n" || return $!;
+   }
+   close(PIPE) || return $!;
+@@ -1208,6 +1217,7 @@
+         $start = join(" ", @a);
+       } else {
+         my($key, $val) = split(/\: ?/, $_, 2);
++#	print("found $key=$val<br>");
+         $new->{$key} = $val; 
+       }
+     }
+@@ -1298,7 +1308,7 @@
+   } else {
+     $DATA{'SORT_QUARANTINE'} .= "$CONFIG{'LANG'}->{$LANGUAGE}->{'quarantine_subject'}";
+   }
+-  $DATA{'SORT_QUARANTINE'} .=  "</a></th>";
++  $DATA{'SORT_QUARANTINE'} .=  "</a></th>\n\t<th>To</th>";
+ 
+ 
+   my($row, $rowclass, $counter);
+@@ -1363,6 +1373,7 @@
+  <td class="$outclass" nowrap="nowrap">$ptime</td>
+  <td class="$outclass" nowrap="nowrap">$row->{'From'}</td>
+  <td class="$outclass" nowrap="nowrap"><a href="$CONFIG{'ME'}?$url">$row->{'Subject'}</a></td>
++        <td class="$outclass" nowrap="true">$row->{'X-DSPAM-Recipient'}</td>
+ </tr>
+ _END
+ 
+Index: webui/cgi-bin/templates/strings.pl
+===================================================================
+--- webui/cgi-bin/templates/strings.pl	(revision 5931)
++++ webui/cgi-bin/templates/strings.pl	(revision 5932)
+@@ -36,6 +36,7 @@
+ $LANG{'quarantine_rating'}		= "Rating";
+ $LANG{'quarantine_date'}		= "Date";
+ $LANG{'quarantine_from'}		= "From";
++$LANG{'quarantine_to'}			= "To";
+ $LANG{'quarantine_subject'}		= "Subject";
+ 
+ $LANG{'history_show'}			= "Show";
+Index: webui/cgi-bin/configure.pl.in
+===================================================================
+--- webui/cgi-bin/configure.pl.in	(revision 5931)
++++ webui/cgi-bin/configure.pl.in	(revision 5932)
+@@ -22,12 +22,12 @@
+ # to the web user.
+ 
+ # Default DSPAM enviroment
+-$CONFIG{'DSPAM_HOME'}	= "@dspam_home@";
+-$CONFIG{'DSPAM_BIN'}	= "@bindir@";
++$CONFIG{'DSPAM_HOME'}	= "/home/system/dspam";
++$CONFIG{'DSPAM_BIN'}	= "/usr/bin";
+ $CONFIG{'DSPAM'}	= $CONFIG{'DSPAM_BIN'} . "/dspam";
+ $CONFIG{'DSPAM_STATS'}	= $CONFIG{'DSPAM_BIN'} . "/dspam_stats";
+ $CONFIG{'DSPAM_ARGS'}	= "--deliver=innocent --class=innocent " .
+-                          "--source=error --user %CURRENT_USER% -d %u";
++                          "--source=error --mail-from=quarantine\@spamfilter.lan --user %CURRENT_USER%";
+ $CONFIG{'TEMPLATES'}	= "./templates";	# Location of HTML templates
+ $CONFIG{'DSPAM_PROCESSES'} = "ps auxw | grep dspam | grep -v 'grep\|cgi\|sock' | wc -l"; # use ps -deaf for Solaris
+ $CONFIG{'MAIL_QUEUE'}	= "mailq | grep '^[0-9,A-F]\{10,12\}[\t ][\t ]*[1-9]' | wc -l";

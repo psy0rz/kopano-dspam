@@ -1,6 +1,8 @@
 #!/bin/bash
 
-#dspam example script. note that this require the dspam-user-patch that adds the receipient user as a header.
+#Dspam example script we use ourselfs.
+#Note that this requires a patches version of dspam with patches/datux_dspam_recipient.patch.
+#This will add the required X-DSPAM-Recipient header to the mail.
 
 SPAM_USER="$1"
 SPAM_ID="$2"
