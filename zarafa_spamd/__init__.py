@@ -108,12 +108,11 @@ class ItemImporter:
 
         with log_exc(self.log):
 
-            #is the document is processed by the spam filter at all?
-            if item.message_class != 'IPM.Note':
-                #only process mails
+            #only process mails that are not in wastebasket
+            if item.message_class != 'IPM.Note' or item.folder == item.store.wastebasket:
                 pass
+            #is the document is processed not processed by the spamfilter at all?
             elif item.header(self.config['header_result'])==None:
-                #only process mails that where scanned by the spamfilter
                 log_str="folder '%s', subject '%s': " % (self.folder.name, item.subject)
                 self.log.debug(log_str+"ignored, no spam-headers found")
             else:
@@ -124,7 +123,7 @@ class ItemImporter:
                 retrained = ( db_get(self.retrained_db, spam_user+"-"+spam_id) == "1" )
                 in_spamfolder = ( item.folder == item.store.junk )
 
-                log_str="folder: '%s', subject: '%s', spam_id: %s, detected_as_spam: %s, retrained: %s, in_spamfolder: %s, CONCLUSION: " % (item.folder.name, item.subject, spam_id, detected_as_spam, retrained, in_spamfolder)
+                log_str="spam_user: %s, folder: '%s', subject: '%s', spam_id: %s, detected_as_spam: %s, retrained: %s, in_spamfolder: %s, CONCLUSION: " % ( spam_user, item.folder.name, item.subject, spam_id, detected_as_spam, retrained, in_spamfolder)
 
                 if detected_as_spam:
                     if in_spamfolder:
