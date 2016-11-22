@@ -113,7 +113,7 @@ class ItemImporter:
                 pass
             #is the document is processed not processed by the spamfilter at all?
             elif item.header(self.config['header_result'])==None:
-                log_str="folder '%s', subject '%s': " % (self.folder.name, item.subject)
+                log_str="folder '%s', subject '%s': " % (item.folder.name, item.subject)
                 self.log.debug(log_str+"ignored, no spam-headers found")
             else:
 
