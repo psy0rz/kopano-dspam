@@ -1,7 +1,7 @@
 from distutils.core import setup, Extension
 
-setup(name='zarafa-spamd',
+setup(name='kopano-dspam',
       version='0.1',
-      packages=['zarafa_spamd'],
+      packages=['kopano_dspam'],
       package_data={'': ['xmltotext.xslt']},
 )

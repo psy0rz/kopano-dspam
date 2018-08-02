@@ -9,16 +9,16 @@ import pprint
 import subprocess
 import re
 
-import zarafa
-from zarafa import log_exc, Config
+import kopano
+from kopano import log_exc, Config
 sys.path.insert(0, os.path.dirname(__file__)) # XXX for __import__ to work
 
 """
-zarafa-spamd v1 - monitors mail-movements to retrain your spamfilter
+kopano-dspam v1 - monitors mail-movements to retrain your spamfilter
 
-(C)2016 Edwin Eefting (edwin@datux.nl), based on zarafa-search and the excellent python-zarafa API.
+(C)2016 Edwin Eefting (edwin@datux.nl), based on kopano-search and the excellent python-kopano API.
 
-Copyright 2005 - 2015  Zarafa B.V. and its licensors
+Copyright 2005 - 2015  Kopano B.V. and its licensors
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU Affero General Public License, version 3,
@@ -36,11 +36,11 @@ along with this program. If not, see http://www.gnu.org/licenses/.
 """
 
 CONFIG = {
-    'run_as_user': Config.string(default="zarafa"),
-    'run_as_group': Config.string(default="zarafa"),
+    'run_as_user': Config.string(default="kopano"),
+    'run_as_group': Config.string(default="kopano"),
 
-    #spamd specific settings:
-    'spamd_path': Config.string(default='/var/lib/zarafa/spamd/'),
+    #dspam specific settings:
+    'dspam_path': Config.string(default='/var/lib/kopano/dspam/'),
     'process_delay': Config.integer(default=1),
 
     'header_result': Config.string(default="X-DSPAM-Result"),
@@ -49,7 +49,7 @@ CONFIG = {
     'header_user': Config.string(default="X-DSPAM-Recipient"),
     'header_id': Config.string(default="X-DSPAM-Signature"),
 
-    'retrain_script': Config.string(default="/etc/zarafa/userscripts/zarafa-spamd-retrain"),
+    'retrain_script': Config.string(default="/etc/kopano/userscripts/kopano-dspam-retrain"),
 
     #filter dangerous characters before calling shell script
     'shell_filter_regex': Config.string(default="[^a-zA-Z0-9_,.-]"),
@@ -69,11 +69,11 @@ def db_put(db_path, key, value):
 
 
 class ItemImporter:
-    """ called by python-zarafa syncer for every item thats updated or deleted """
+    """ called by python-kopano syncer for every item thats updated or deleted """
 
     def __init__(self, *args):
         self.server, self.config, self.log = args
-        self.retrained_db = os.path.join(self.config['spamd_path'], self.server.guid+'_retrained')
+        self.retrained_db = os.path.join(self.config['dspam_path'], self.server.guid+'_retrained')
 
     def call_retrain_script(self, spam_user, spam_id, classification, undo):
         cmd = [
@@ -162,17 +162,17 @@ class ItemImporter:
         with log_exc(self.log):
             self.log.debug('deleted document with sourcekey %s' % ( item.sourcekey ))
 
-class Service(zarafa.Service):
-    """ main spamd process """
+class Service(kopano.Service):
+    """ main dspam process """
 
     def main(self):
         """ start initial syncing if no state found. then start query process and switch to incremental syncing """
 
-        spamd_path = self.config['spamd_path']
+        dspam_path = self.config['dspam_path']
         os.umask(0077)
-        if not os.path.exists(spamd_path):
-            os.makedirs(spamd_path)
-        state_db = os.path.join(spamd_path, self.server.guid+'_state')
+        if not os.path.exists(dspam_path):
+            os.makedirs(dspam_path)
+        state_db = os.path.join(dspam_path, self.server.guid+'_state')
         state = db_get(state_db, 'SERVER')
         if state:
             self.log.debug('found previous server sync state: %s' % state)
@@ -195,9 +195,9 @@ class Service(zarafa.Service):
 
 
 def main():
-    parser = zarafa.parser('ckpsF') # select common cmd-line options
+    parser = kopano.parser('ckpsF') # select common cmd-line options
     options, args = parser.parse_args()
-    service = Service('spamd', config=CONFIG, options=options)
+    service = Service('dspam', config=CONFIG, options=options)
     service.start()
 
 if __name__ == '__main__':
