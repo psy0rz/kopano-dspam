@@ -2,7 +2,7 @@ Kopano realtime spam retraining.
 
 Difference with the normal kopano-spamd:
 
- * It runs script instead of creating mails in a folder.
+ * It runs a script instead of creating mails in a folder.
  * Can also untrain when you undo a move.
  * Has better logging.
  * Configurable spam-header so it can be used for all kinds of 3rd party spam systems.
