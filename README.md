@@ -15,3 +15,4 @@ Example logging output:
 2018-08-03 11:06:19,735 - dspam - DEBUG - Command exited with code 0
 ```
  
+We created this plugin for our own Linux distribution which can be found on https://www.syn-3.eu.
